@@ -2,8 +2,8 @@
 #include <SPI.h>
 #include <ESP8266_AT_Client.h>
 #include <SdFat.h>
-#include <RTClib.h>
-#include <RTC_DS3231.h>
+//#include <RTClib.h> //vaa rtc
+//#include <RTC_DS3231.h> //vaa rtc
 #include <Time.h>
 #include <TinyWatchdog.h>
 #include <SHT25.h>
@@ -47,7 +47,7 @@ byte mqtt_server_ip[4] = { 0 };
 PubSubClient mqtt_client;
 char mqtt_client_id[32] = {0};
 
-RTC_DS3231 rtc;
+//RTC_DS3231 rtc; //vaa rtc
 SdFat SD;
 
 TinyGPS gps;
@@ -120,7 +120,7 @@ boolean init_no2_adc_ok = false;
 boolean init_spi_flash_ok = false;
 boolean init_esp8266_ok = false;
 boolean init_sdcard_ok = false;
-boolean init_rtc_ok = false;
+//boolean init_rtc_ok = false; //vaa rtc
 
 typedef struct{
   float temperature_degC;     // starting at this temperature 
@@ -1090,6 +1090,7 @@ void initializeHardware(void) {
   }
 
   // Initialize SD card
+  /* //vaa rtc
   Serial.print(F("Info: RTC Initialization..."));   
   selectSlot3();  
   rtc.begin();
@@ -1102,6 +1103,7 @@ void initializeHardware(void) {
     Serial.println(F("Fail.")); 
     init_rtc_ok = false;  
   }
+  */
 
   selectNoSlot();
 
@@ -2889,6 +2891,7 @@ void AQE_set_datetime(char * arg){
   // if we have an RTC set the time in the RTC
   DateTime datetime(yr,mo,dy,hr,mn,sc);
   
+  /* //vaa rtc
   // it's not harmful to do this
   // even if the RTC is not present
   selectSlot3();
@@ -2897,7 +2900,7 @@ void AQE_set_datetime(char * arg){
   // also clear the Oscillator Stop Flag
   // this should really be folded into the RTCLib code
   rtcClearOscillatorStopFlag();
-  
+  */
       
   // at any rate sync the time to this
   setTime(datetime.unixtime());
@@ -6691,9 +6694,11 @@ void mirrored_config_erase(void){
 
 /****** TIMESTAMPING SUPPORT FUNCTIONS ******/
 time_t AQE_now(void){
+  /* //vaa rtc
   selectSlot3();
   DateTime t = rtc.now();
   return (time_t) t.unixtime();
+  */
 }
 
 void currentTimestamp(char * dst, uint16_t max_len){
@@ -6742,6 +6747,7 @@ void getNowFilename(char * dst, uint16_t max_len){
 }
 
 void rtcClearOscillatorStopFlag(void){
+    /* //vaa rtc
     Wire.beginTransmission(DS3231_ADDRESS);
     Wire.write(DS3231_REG_CONTROL);
     Wire.endTransmission();
@@ -6757,6 +6763,7 @@ void rtcClearOscillatorStopFlag(void){
     Wire.write((uint8_t) DS3231_REG_STATUS_CTL);
     Wire.write((uint8_t) sreg);
     Wire.endTransmission();    
+    */
 }
 
 /****** GPS SUPPORT FUNCTIONS ******/
@@ -6843,10 +6850,12 @@ void getNetworkTime(void){
 
     selectSlot3();     
     DateTime datetime(t);
+    /* //vaa rtc
     rtc.adjust(datetime);
     rtcClearOscillatorStopFlag();
     selectNoSlot();
-
+    */
+    
     memset(buf, 0, 48);
     snprintf((char *) buf, 47, 
       "%d/%d/%d",
