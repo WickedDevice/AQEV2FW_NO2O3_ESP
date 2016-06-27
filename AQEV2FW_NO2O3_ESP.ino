@@ -198,11 +198,13 @@ uint8_t mode = MODE_OPERATIONAL;
 #define EEPROM_O3_BASELINE_VOLTAGE_TABLE (EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
 #define EEPROM_MQTT_TOPIC_SUFFIX_ENABLED  (EEPROM_O3_BASELINE_VOLTAGE_TABLE - 1)  
 #define EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE (EEPROM_MQTT_TOPIC_SUFFIX_ENABLED - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
+#define EEPROM_NO2_CROSS_SENSITIVITY (EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE - 4) // the cross-sensitivity of the Ozone sensor to NO2, a % between 0 and 100
 //  /\
 //   L Add values up here by subtracting offsets to previously added values
 //   * ... and make sure the addresses don't collide and start overlapping!
 //   T Add values down here by adding offsets to previously added values
 //  \/
+#define EEPROM_BACKUP_NO2_CROSS_SENSITIVITY (EEPROM_BACKUP_NTP_TZ_OFFSET_HRS + 4)
 #define EEPROM_BACKUP_NTP_TZ_OFFSET_HRS  (EEPROM_BACKUP_HUMIDITY_OFFSET + 4)
 #define EEPROM_BACKUP_HUMIDITY_OFFSET    (EEPROM_BACKUP_TEMPERATURE_OFFSET + 4)
 #define EEPROM_BACKUP_TEMPERATURE_OFFSET (EEPROM_BACKUP_PRIVATE_KEY + 32)
@@ -286,6 +288,7 @@ void no2_we_baseline_voltage_characterization_command(char * arg);
 void no2_aux_baseline_voltage_characterization_command(char * arg);
 void o3_baseline_voltage_characterization_command(char * arg);
 void topic_suffix_config(char * arg);
+void no2_cross_sensitivity(char * arg);
 
 // Note to self:
 //   When implementing a new parameter, ask yourself:
@@ -350,6 +353,7 @@ const char cmd_string_tz_off[] PROGMEM      = "tz_off     ";
 const char cmd_string_no2_we_blv[] PROGMEM  = "no2we_blv  ";
 const char cmd_string_no2_aux_blv[] PROGMEM = "no2aux_blv ";
 const char cmd_string_o3_blv[] PROGMEM      = "o3_blv     ";
+const char cmd_string_no2_xsen[] PROGMEM    = "no2_cross  ";
 const char cmd_string_null[] PROGMEM        = "";
 
 
@@ -399,6 +403,7 @@ PGM_P const commands[] PROGMEM = {
   cmd_string_no2_we_blv,
   cmd_string_no2_aux_blv,
   cmd_string_o3_blv, 
+  cmd_string_no2_xsen,
   cmd_string_null
 };
 
@@ -448,6 +453,7 @@ void (*command_functions[])(char * arg) = {
   no2_we_baseline_voltage_characterization_command,
   no2_aux_baseline_voltage_characterization_command,
   o3_baseline_voltage_characterization_command,
+  no2_cross_sensitivity,
   0
 };
 
@@ -1443,6 +1449,7 @@ void help_menu(char * arg) {
       Serial.println(F("      o3_sen - O3 sensitivity [nA/ppm]"));
       Serial.println(F("      o3_slope - O3 sensors slope [ppb/V]"));
       Serial.println(F("      o3_off - O3 sensors offset [V]"));
+      Serial.println(F("      no2_cross - O3 cross-sensitivty to NO2 [% 0..100]"));
       get_help_indent(); Serial.println(F("temp_off - Temperature sensor reporting offset [degC] (subtracted)"));
       get_help_indent(); Serial.println(F("hum_off - Humidity sensor reporting offset [%] (subtracted)"));      
       get_help_indent(); Serial.println(F("key - lol, sorry, that's also not happening!"));
@@ -1682,7 +1689,7 @@ void help_menu(char * arg) {
     }
     else if (strncmp("no2_sen", arg, 7) == 0) {
       Serial.println(F("no2_sen <number>"));
-      get_help_indent(); Serial.println(F("<number> is the decimal value of NO2 sensitivity [nA/ppm]"));
+      get_help_indent(); Serial.println(F("<number> is the decimal value of NO2 sensitivity [mV/ppb]"));
       get_help_indent(); Serial.println(F("note: also sets the NO2 slope based on the sensitivity"));
     }
     else if (strncmp("no2_slope", arg, 9) == 0) {
@@ -1706,6 +1713,10 @@ void help_menu(char * arg) {
       Serial.println(F("o3_off <number>"));
       get_help_indent(); Serial.println(F("<number> is the decimal value of O3 sensor offset [V]"));
     }
+    else if (strncmp("no2_cross", arg, 9) == 0) {
+      Serial.println(F("no2_cross <number>"));
+      get_help_indent(); Serial.println(F("<number> is the decimal value of Ozone cross-sensitivity to NO2 [% 0..100]"));      
+    }    
     else if (strncmp("temp_off", arg, 8) == 0) {
       Serial.println(F("temp_off <number>"));
       get_help_indent(); Serial.println(F("<number> is the decimal value of Temperature sensor reporting offset [degC] (subtracted)"));
@@ -2134,6 +2145,9 @@ void print_eeprom_value(char * arg) {
   else if (strncmp(arg, "o3_off", 6) == 0) {
     print_eeprom_float((const float *) EEPROM_O3_CAL_OFFSET);
   }
+  else if (strncmp(arg, "no2_cross", 9) == 0) {
+    print_eeprom_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);
+  }  
   else if (strncmp(arg, "temp_off", 8) == 0) {
     print_eeprom_float((const float *) EEPROM_TEMPERATURE_OFFSET);
   }
@@ -2265,7 +2279,7 @@ void print_eeprom_value(char * arg) {
     Serial.println(F(" | Sensor Calibrations:                                        |"));
     Serial.println(F(" +-------------------------------------------------------------+"));
 
-    print_label_with_star_if_not_backed_up("NO2 Sensitivity [nA/ppm]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
+    print_label_with_star_if_not_backed_up("NO2 Sensitivity [mV/ppb]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_NO2_SENSITIVITY);
     print_label_with_star_if_not_backed_up("NO2 Slope [ppb/V]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_NO2_CAL_SLOPE);
@@ -2282,6 +2296,8 @@ void print_eeprom_value(char * arg) {
     print_eeprom_float((const float *) EEPROM_O3_CAL_SLOPE);
     print_label_with_star_if_not_backed_up("O3 Offset [V]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_O3_CAL_OFFSET);
+    print_label_with_star_if_not_backed_up("NO2 Cross-Sensitivity [%]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
+    print_eeprom_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);    
     Serial.print(F("    ")); Serial.println(F("O3 Baseline Voltage Characterization:"));
     print_baseline_voltage_characterization(EEPROM_O3_BASELINE_VOLTAGE_TABLE);
     
@@ -2483,6 +2499,8 @@ void restore(char * arg) {
     eeprom_write_block(tmp, (void *) EEPROM_O3_CAL_SLOPE, 4);
     eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_O3_CAL_OFFSET, 4);
     eeprom_write_block(tmp, (void *) EEPROM_O3_CAL_OFFSET, 4);
+    eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_NO2_CROSS_SENSITIVITY, 4);
+    eeprom_write_block(tmp, (void *) EEPROM_NO2_CROSS_SENSITIVITY, 4);    
   }
   else if (strncmp("temp_off", arg, 8) == 0) {
     if (!BIT_IS_CLEARED(backup_check, BACKUP_STATUS_TEMPERATURE_CALIBRATION_BIT)) {
@@ -3649,7 +3667,9 @@ void backup(char * arg) {
     eeprom_write_block(tmp, (void *) EEPROM_BACKUP_O3_CAL_SLOPE, 4);
     eeprom_read_block(tmp, (const void *) EEPROM_O3_CAL_OFFSET, 4);
     eeprom_write_block(tmp, (void *) EEPROM_BACKUP_O3_CAL_OFFSET, 4);
-
+    eeprom_read_block(tmp, (const void *) EEPROM_NO2_CROSS_SENSITIVITY, 4);
+    eeprom_write_block(tmp, (void *) EEPROM_BACKUP_NO2_CROSS_SENSITIVITY, 4);
+    
     if (!BIT_IS_CLEARED(backup_check, BACKUP_STATUS_O3_CALIBRATION_BIT)) {
       CLEAR_BIT(backup_check, BACKUP_STATUS_O3_CALIBRATION_BIT);
       eeprom_write_word((uint16_t *) EEPROM_BACKUP_CHECK, backup_check);
@@ -3746,11 +3766,11 @@ void set_ntp_timezone_offset(char * arg){
 }
 
 // convert from mV/ppm to ppb/V
-// M[V/ppb] = (1 / (Sensitivity[mV/ppm] * 10^-3[V/mV])) * 10^-3[ppb/ppm]
-// M[V/ppb] = (1 / Sensitivity[mV/ppm])
-// sensitivity constant (mV/ppm) provided by AlphaSense
+// M[V/ppb] = (1 / (Sensitivity[mV/ppb] * 10^-3[V/mV]))
+// M[V/ppb] = (1000.0 / Sensitivity[mV/ppb])
+// sensitivity constant (mV/ppb) provided by AlphaSense
 float convert_no2_sensitivity_to_slope(float sensitivity) {
-  float ret = 1.0f;
+  float ret = 1000.0f;
   ret /= sensitivity; 
   return ret;
 }
@@ -3767,6 +3787,10 @@ void set_no2_slope(char * arg) {
 
 void set_no2_offset(char * arg) {
   set_float_param(arg, (float *) EEPROM_NO2_CAL_OFFSET, 0);
+}
+
+void no2_cross_sensitivity(char * arg){
+  set_float_param(arg, (float *) EEPROM_NO2_CROSS_SENSITIVITY, 0);
 }
 
 void set_reported_temperature_offset(char * arg) {
@@ -5532,12 +5556,15 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
   static boolean first_access = true;
   static float o3_zero_volts = 0.0f;
   static float o3_slope_ppb_per_volt = 0.0f;
+  static float no2_cross_sensitivity = 0.0f;
+  
   float temperature_coefficient_of_span = 0.0f;
   float temperature_compensated_slope = 0.0f;  
   if(first_access){
     // O3 has positive slope in circuit, more positive voltages correspond to higher levels of O3
     o3_slope_ppb_per_volt = eeprom_read_float((const float *) EEPROM_O3_CAL_SLOPE);
     o3_zero_volts = eeprom_read_float((const float *) EEPROM_O3_CAL_OFFSET);
+    no2_cross_sensitivity = eeprom_read_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);
     first_access = false;
   }
 
@@ -5625,7 +5652,7 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
     // volts should always be *smaller* than baseline_offset_voltage_at_temperature in the presense of O3 gas
     *temperature_compensated_value = (baseline_offset_voltage_at_temperature - volts) * o3_slope_ppb_per_volt 
                                      / signal_scaling_factor_at_temperature 
-                                     / signal_scaling_factor_at_altitude;     
+                                     / signal_scaling_factor_at_altitude;         
   }
   else{  
     // otherwise the static data-sheet based method prevails and we do the same math as before
@@ -5633,6 +5660,8 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
                                    / signal_scaling_factor_at_temperature
                                    / signal_scaling_factor_at_altitude;                                    
   }    
+
+  *temperature_compensated_value -= no2_cross_sensitivity * no2_ppb; // account for cross-sensitivity to no2
                                    
   if(*temperature_compensated_value <= 0.0f){
     *temperature_compensated_value = 0.0f;
