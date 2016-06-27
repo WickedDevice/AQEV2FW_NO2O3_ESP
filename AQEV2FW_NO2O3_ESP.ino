@@ -5582,7 +5582,7 @@ boolean publishNO2(){
   clearTempBuffers();
   float converted_value = 0.0f, compensated_value = 0.0f;    
   float no2_we_moving_average = calculateAverage(&(sample_buffer[NO2_WE_SAMPLE_BUFFER][0]), sample_buffer_depth);
-  float no2_aux_moving_average = calculateAverage(&(sample_buffer[NO2_WE_SAMPLE_BUFFER][0]), sample_buffer_depth);
+  float no2_aux_moving_average = calculateAverage(&(sample_buffer[NO2_AUX_SAMPLE_BUFFER][0]), sample_buffer_depth);
   no2_convert_from_volts_to_ppb(no2_we_moving_average, no2_aux_moving_average, &converted_value, &compensated_value);
   no2_ppb = compensated_value;  
   safe_dtostrf(no2_we_moving_average, -8, 6, raw_value_string, 16);
