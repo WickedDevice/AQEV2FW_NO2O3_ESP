@@ -117,8 +117,6 @@ boolean humidity_ready = false;
 
 boolean init_sht25_ok = false;
 boolean init_o3_afe_ok = false;
-boolean init_no2_we_afe_ok = false;
-boolean init_no2_aux_afe_ok = false;
 boolean init_o3_adc_ok = false;
 boolean init_no2_we_adc_ok = false;
 boolean init_no2_aux_adc_ok = false;
@@ -503,7 +501,8 @@ const char * header_row = "Timestamp,"
                "Humidity[percent],"                                     
                "NO2[ppb],"                    
                "O3[ppb],"      
-               "NO2[V]," 
+               "NO2_WE[V]," 
+               "NO2_Aux[V]," 
                "O3[V],"  
                "Latitude[deg],"
                "Longitude[deg],"
@@ -1051,21 +1050,7 @@ void initializeHardware(void) {
   }
 
   // Initialize NO2 Sensor
-  Serial.print(F("Info: NO2 Sensor WE AFE Initialization..."));
   selectSlot2();
-  if (lmp91000.configure(
-        LMP91000_TIA_GAIN_120K | LMP91000_RLOAD_10OHM,
-        LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_20PCT
-        | LMP91000_BIAS_SIGN_POS | LMP91000_BIAS_8PCT,
-        LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC)) {
-    Serial.println(F("OK."));
-    init_no2_we_afe_ok = true;
-  }
-  else {
-    Serial.println(F("Failed."));
-    init_no2_we_afe_ok = false;
-  }
-
   Serial.print(F("Info: NO2 Sensor WE ADC Initialization..."));
   if(MCP342x::errorNone == adc.convert(MCP342x::channel1, MCP342x::oneShot, MCP342x::resolution16, MCP342x::gain1)){
     Serial.println(F("OK."));
@@ -1076,21 +1061,7 @@ void initializeHardware(void) {
     init_no2_we_adc_ok = false;    
   }
 
-  Serial.print(F("Info: NO2 Sensor Aux AFE Initialization..."));
   selectSlot3();
-  if (lmp91000.configure(
-        LMP91000_TIA_GAIN_120K | LMP91000_RLOAD_10OHM,
-        LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_20PCT
-        | LMP91000_BIAS_SIGN_POS | LMP91000_BIAS_8PCT,
-        LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC)) {
-    Serial.println(F("OK."));
-    init_no2_aux_afe_ok = true;
-  }
-  else {
-    Serial.println(F("Failed."));
-    init_no2_aux_afe_ok = false;
-  }
-
   Serial.print(F("Info: NO2 Sensor Aux ADC Initialization..."));
   if(MCP342x::errorNone == adc.convert(MCP342x::channel1, MCP342x::oneShot, MCP342x::resolution16, MCP342x::gain1)){
     Serial.println(F("OK."));
@@ -1466,7 +1437,7 @@ void help_menu(char * arg) {
       get_help_indent(); Serial.println(F("mqttauth - MQTT authentication enabled?"));      
       get_help_indent(); Serial.println(F("updatesrv - Update server name"));      
       get_help_indent(); Serial.println(F("updatefile - Update filename (no extension)"));          
-      Serial.println(F("      no2_sen - NO2 sensitivity [nA/ppm]"));
+      Serial.println(F("      no2_sen - NO2 sensitivity [mV/ppm]"));
       Serial.println(F("      no2_slope - NO2 sensors slope [ppb/V]"));
       Serial.println(F("      no2_off - NO2 sensors offset [V]"));
       Serial.println(F("      o3_sen - O3 sensitivity [nA/ppm]"));
@@ -5350,7 +5321,7 @@ void addSample(uint8_t sample_type, float value){
 }
 
 void collectNO2(void){  
-  if(init_no2_we_afe_ok && init_no2_we_adc_ok && init_no2_aux_afe_ok && init_no2_aux_adc_ok){
+  if(init_no2_we_adc_ok && init_no2_aux_adc_ok){
     selectSlot2();  
     if(burstSampleADC(&instant_no2_we_v)){      
       addSample(NO2_WE_SAMPLE_BUFFER, instant_no2_we_v);
@@ -5812,7 +5783,7 @@ void loop_wifi_mqtt_mode(void){
           updateLCD("XXX", 13, 0, 3);
         }
         
-        if(init_no2_we_afe_ok && init_no2_we_adc_ok && init_no2_aux_afe_ok && init_no2_aux_adc_ok){
+        if(init_no2_we_adc_ok && init_no2_aux_adc_ok){
           if(no2_we_ready && no2_aux_ready){
             if(!publishNO2()){
               Serial.println(F("Error: Failed to publish NO2."));          
