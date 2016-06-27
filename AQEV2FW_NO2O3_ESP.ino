@@ -1155,7 +1155,7 @@ void initializeNewConfigSettings(void){
   float tmp = eeprom_read_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);
   if(isnan(tmp)){
     configInject("aqe\r");    
-    configInject("no2_cross 0");
+    configInject("no2_cross 0\r");
     in_config_mode = true;    
   }
   
