@@ -5427,7 +5427,7 @@ void advanceSampleBufferIndex(void){
 }
 
 void addSample(uint8_t sample_type, float value){
-  if((sample_type < 4) && (sample_buffer_idx < MAX_SAMPLE_BUFFER_DEPTH)){
+  if((sample_type < 5) && (sample_buffer_idx < MAX_SAMPLE_BUFFER_DEPTH)){
     sample_buffer[sample_type][sample_buffer_idx] = value;    
   }
 }
