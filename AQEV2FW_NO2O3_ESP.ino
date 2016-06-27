@@ -2,7 +2,7 @@
 #include <SPI.h>
 #include <ESP8266_AT_Client.h>
 #include <SdFat.h>
-//#include <RTClib.h> //vaa rtc
+#include <RTClib.h> //vaa rtc
 //#include <RTC_DS3231.h> //vaa rtc
 #include <Time.h>
 #include <TinyWatchdog.h>
@@ -81,7 +81,8 @@ float o3_ppb = 0.0f;
 
 float instant_temperature_degc = 0.0f;
 float instant_humidity_percent = 0.0f;
-float instant_no2_v = 0.0f;
+float instant_no2_we_v = 0.0f;
+float instant_no2_aux_v = 0.0f;
 float instant_o3_v = 0.0f;
 
 float gps_latitude = TinyGPS::GPS_INVALID_F_ANGLE;
@@ -90,11 +91,12 @@ float gps_altitude = TinyGPS::GPS_INVALID_F_ALTITUDE;
 unsigned long gps_age = TinyGPS::GPS_INVALID_AGE;
 
 #define MAX_SAMPLE_BUFFER_DEPTH (240) // 20 minutes @ 5 second resolution
-#define NO2_SAMPLE_BUFFER         (0)
-#define O3_SAMPLE_BUFFER          (1)
-#define TEMPERATURE_SAMPLE_BUFFER (2)
-#define HUMIDITY_SAMPLE_BUFFER    (3)
-float sample_buffer[4][MAX_SAMPLE_BUFFER_DEPTH] = {0};
+#define NO2_WE_SAMPLE_BUFFER      (0)
+#define NO2_AUX_SAMPLE_BUFFER     (1)
+#define O3_SAMPLE_BUFFER          (2)
+#define TEMPERATURE_SAMPLE_BUFFER (3)
+#define HUMIDITY_SAMPLE_BUFFER    (4)
+float sample_buffer[5][MAX_SAMPLE_BUFFER_DEPTH] = {0};
 uint16_t sample_buffer_idx = 0;
 
 uint32_t sampling_interval = 0;    // how frequently the sensorss are sampled
@@ -107,16 +109,19 @@ float touch_sample_buffer[TOUCH_SAMPLE_BUFFER_DEPTH] = {0};
 #define LCD_ERROR_MESSAGE_DELAY   (4000)
 #define LCD_SUCCESS_MESSAGE_DELAY (2000)
 
-boolean no2_ready = false;
+boolean no2_we_ready = false;
+boolean no2_aux_ready = false;
 boolean o3_ready = false;
 boolean temperature_ready = false;
 boolean humidity_ready = false;
 
 boolean init_sht25_ok = false;
 boolean init_o3_afe_ok = false;
-boolean init_no2_afe_ok = false;
+boolean init_no2_we_afe_ok = false;
+boolean init_no2_aux_afe_ok = false;
 boolean init_o3_adc_ok = false;
-boolean init_no2_adc_ok = false;
+boolean init_no2_we_adc_ok = false;
+boolean init_no2_aux_adc_ok = false;
 boolean init_spi_flash_ok = false;
 boolean init_esp8266_ok = false;
 boolean init_sdcard_ok = false;
@@ -191,9 +196,10 @@ uint8_t mode = MODE_OPERATIONAL;
 #define EEPROM_USE_NTP            (EEPROM_MQTT_TOPIC_PREFIX - 1)  // 1 means use NTP, anything else means don't use NTP
 #define EEPROM_NTP_SERVER_NAME    (EEPROM_USE_NTP - 32)           // 32-bytes for the NTP server to use
 #define EEPROM_NTP_TZ_OFFSET_HRS  (EEPROM_NTP_SERVER_NAME - 4)    // timezone offset as a floating point value
-#define EEPROM_NO2_BASELINE_VOLTAGE_TABLE (EEPROM_NTP_TZ_OFFSET_HRS - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
-#define EEPROM_O3_BASELINE_VOLTAGE_TABLE (EEPROM_NO2_BASELINE_VOLTAGE_TABLE - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
+#define EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE (EEPROM_NTP_TZ_OFFSET_HRS - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
+#define EEPROM_O3_BASELINE_VOLTAGE_TABLE (EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
 #define EEPROM_MQTT_TOPIC_SUFFIX_ENABLED  (EEPROM_O3_BASELINE_VOLTAGE_TABLE - 1)  
+#define EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE (EEPROM_MQTT_TOPIC_SUFFIX_ENABLED - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
 //  /\
 //   L Add values up here by subtracting offsets to previously added values
 //   * ... and make sure the addresses don't collide and start overlapping!
@@ -278,7 +284,8 @@ void altitude_command(char * arg);
 void set_ntp_server(char * arg);
 void set_ntp_timezone_offset(char * arg);
 void set_update_server_name(char * arg);
-void no2_baseline_voltage_characterization_command(char * arg);
+void no2_we_baseline_voltage_characterization_command(char * arg);
+void no2_aux_baseline_voltage_characterization_command(char * arg);
 void o3_baseline_voltage_characterization_command(char * arg);
 void topic_suffix_config(char * arg);
 
@@ -342,7 +349,8 @@ const char cmd_string_sampling[] PROGMEM    = "sampling   ";
 const char cmd_string_altitude[] PROGMEM    = "altitude   ";
 const char cmd_string_ntpsrv[] PROGMEM      = "ntpsrv     ";
 const char cmd_string_tz_off[] PROGMEM      = "tz_off     ";
-const char cmd_string_no2_blv[] PROGMEM     = "no2_blv    ";
+const char cmd_string_no2_we_blv[] PROGMEM  = "no2we_blv  ";
+const char cmd_string_no2_aux_blv[] PROGMEM = "no2aux_blv ";
 const char cmd_string_o3_blv[] PROGMEM      = "o3_blv     ";
 const char cmd_string_null[] PROGMEM        = "";
 
@@ -390,7 +398,8 @@ PGM_P const commands[] PROGMEM = {
   cmd_string_altitude,
   cmd_string_ntpsrv,
   cmd_string_tz_off,
-  cmd_string_no2_blv,
+  cmd_string_no2_we_blv,
+  cmd_string_no2_aux_blv,
   cmd_string_o3_blv, 
   cmd_string_null
 };
@@ -438,7 +447,8 @@ void (*command_functions[])(char * arg) = {
   altitude_command,
   set_ntp_server,
   set_ntp_timezone_offset,
-  no2_baseline_voltage_characterization_command,
+  no2_we_baseline_voltage_characterization_command,
+  no2_aux_baseline_voltage_characterization_command,
   o3_baseline_voltage_characterization_command,
   0
 };
@@ -480,7 +490,9 @@ uint8_t esp8266_input_buffer[ESP8266_INPUT_BUFFER_SIZE] = {0};     // sketch mus
 char converted_value_string[64] = {0};
 char compensated_value_string[64] = {0};
 char raw_value_string[64] = {0};
+char raw_value_string2[64] = {0};
 char raw_instant_value_string[64] = {0};
+char raw_instant_value_string2[64] = {0};
 
 char MQTT_TOPIC_STRING[128] = {0};
 char MQTT_TOPIC_PREFIX[64] = "/orgs/wd/aqe/";
@@ -1039,7 +1051,7 @@ void initializeHardware(void) {
   }
 
   // Initialize NO2 Sensor
-  Serial.print(F("Info: NO2 Sensor AFE Initialization..."));
+  Serial.print(F("Info: NO2 Sensor WE AFE Initialization..."));
   selectSlot2();
   if (lmp91000.configure(
         LMP91000_TIA_GAIN_120K | LMP91000_RLOAD_10OHM,
@@ -1047,21 +1059,46 @@ void initializeHardware(void) {
         | LMP91000_BIAS_SIGN_POS | LMP91000_BIAS_8PCT,
         LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC)) {
     Serial.println(F("OK."));
-    init_no2_afe_ok = true;
+    init_no2_we_afe_ok = true;
   }
   else {
     Serial.println(F("Failed."));
-    init_no2_afe_ok = false;
+    init_no2_we_afe_ok = false;
   }
 
-  Serial.print(F("Info: NO2 Sensor ADC Initialization..."));
+  Serial.print(F("Info: NO2 Sensor WE ADC Initialization..."));
   if(MCP342x::errorNone == adc.convert(MCP342x::channel1, MCP342x::oneShot, MCP342x::resolution16, MCP342x::gain1)){
     Serial.println(F("OK."));
-    init_no2_adc_ok = true;    
+    init_no2_we_adc_ok = true;    
   }
   else{
     Serial.println(F("Failed."));
-    init_no2_adc_ok = false;    
+    init_no2_we_adc_ok = false;    
+  }
+
+  Serial.print(F("Info: NO2 Sensor Aux AFE Initialization..."));
+  selectSlot3();
+  if (lmp91000.configure(
+        LMP91000_TIA_GAIN_120K | LMP91000_RLOAD_10OHM,
+        LMP91000_REF_SOURCE_EXT | LMP91000_INT_Z_20PCT
+        | LMP91000_BIAS_SIGN_POS | LMP91000_BIAS_8PCT,
+        LMP91000_FET_SHORT_DISABLED | LMP91000_OP_MODE_AMPEROMETRIC)) {
+    Serial.println(F("OK."));
+    init_no2_aux_afe_ok = true;
+  }
+  else {
+    Serial.println(F("Failed."));
+    init_no2_aux_afe_ok = false;
+  }
+
+  Serial.print(F("Info: NO2 Sensor Aux ADC Initialization..."));
+  if(MCP342x::errorNone == adc.convert(MCP342x::channel1, MCP342x::oneShot, MCP342x::resolution16, MCP342x::gain1)){
+    Serial.println(F("OK."));
+    init_no2_aux_adc_ok = true;    
+  }
+  else{
+    Serial.println(F("Failed."));
+    init_no2_aux_adc_ok = false;    
   }
 
   Serial.print(F("Info: O3 Sensor AFE Initialization..."));
@@ -2263,9 +2300,11 @@ void print_eeprom_value(char * arg) {
     print_eeprom_float((const float *) EEPROM_NO2_CAL_SLOPE);
     print_label_with_star_if_not_backed_up("NO2 Offset [V]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_NO2_CAL_OFFSET);
-    Serial.print(F("    ")); Serial.println(F("NO2 Baseline Voltage Characterization:"));
-    print_baseline_voltage_characterization(EEPROM_NO2_BASELINE_VOLTAGE_TABLE);
-
+    Serial.print(F("    ")); Serial.println(F("NO2 Baseline Voltage WE Characterization:"));
+    print_baseline_voltage_characterization(EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE);
+    Serial.print(F("    ")); Serial.println(F("NO2 Baseline Voltage Aux Characterization:"));
+    print_baseline_voltage_characterization(EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE);
+    
     print_label_with_star_if_not_backed_up("O3 Sensitivity [nA/ppm]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_O3_SENSITIVITY);
     print_label_with_star_if_not_backed_up("O3 Slope [ppb/V]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
@@ -3735,15 +3774,13 @@ void set_ntp_timezone_offset(char * arg){
   set_float_param(arg, (float *) EEPROM_NTP_TZ_OFFSET_HRS, NULL);
 }
 
-// convert from nA/ppm to ppb/V
-// from SPEC Sensors, Sensor Development Kit, User Manual, Rev. 1.5
-// M[V/ppb] = Sensitivity[nA/ppm] * TIA_Gain[kV/A] * 10^-9[A/nA] * 10^3[V/kV] * 10^-3[ppb/ppm]
-// TIA_Gain[kV/A] for NO2 = 120
-// slope = 1/M
+// convert from mV/ppm to ppb/V
+// M[V/ppb] = (1 / (Sensitivity[mV/ppm] * 10^-3[V/mV])) * 10^-3[ppb/ppm]
+// M[V/ppb] = (1 / Sensitivity[mV/ppm])
+// sensitivity constant (mV/ppm) provided by AlphaSense
 float convert_no2_sensitivity_to_slope(float sensitivity) {
-  float ret = 1.0e9f;
-  ret /= sensitivity;
-  ret /= 120.0f;
+  float ret = 1.0f;
+  ret /= sensitivity; 
   return ret;
 }
 
@@ -4059,12 +4096,16 @@ void o3_baseline_voltage_characterization_command(char * arg){
   baseline_voltage_characterization_command(arg, EEPROM_O3_BASELINE_VOLTAGE_TABLE);
 }
 
-void no2_baseline_voltage_characterization_command(char * arg){
-  baseline_voltage_characterization_command(arg, EEPROM_NO2_BASELINE_VOLTAGE_TABLE);
+void no2_we_baseline_voltage_characterization_command(char * arg){
+  baseline_voltage_characterization_command(arg, EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE);
+}
+
+void no2_aux_baseline_voltage_characterization_command(char * arg){
+  baseline_voltage_characterization_command(arg, EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE);
 }
 
 void load_temperature_characterization_entry(uint32_t eeprom_table_base_address, uint8_t index){
-  eeprom_read_block((void *) &baseline_voltage_struct, (void *) (eeprom_table_base_address + (index*sizeof(baseline_voltage_t))), sizeof(baseline_voltage_t));  
+  eeprom_read_block((void *) &baseline_voltage_struct, (void *) (eeprom_table_base_address + (index*sizeof(baseline_voltage_t))), sizeof(baseline_voltage_t));
 }
 
 boolean load_and_validate_temperature_characterization_entry(uint32_t eeprom_table_base_address, uint8_t index){
@@ -4949,7 +4990,9 @@ void clearTempBuffers(void){
   memset(converted_value_string, 0, 64);
   memset(compensated_value_string, 0, 64);
   memset(raw_value_string, 0, 64);
+  memset(raw_value_string2, 0, 64);
   memset(raw_instant_value_string, 0, 64);
+  memset(raw_instant_value_string2, 0, 64);
   memset(scratch, 0, 512);
   memset(MQTT_TOPIC_STRING, 0, 128);
 }
@@ -5307,14 +5350,22 @@ void addSample(uint8_t sample_type, float value){
 }
 
 void collectNO2(void){  
-  if(init_no2_afe_ok && init_no2_adc_ok){
+  if(init_no2_we_afe_ok && init_no2_we_adc_ok && init_no2_aux_afe_ok && init_no2_aux_adc_ok){
     selectSlot2();  
-    if(burstSampleADC(&instant_no2_v)){      
-      addSample(NO2_SAMPLE_BUFFER, instant_no2_v);
+    if(burstSampleADC(&instant_no2_we_v)){      
+      addSample(NO2_WE_SAMPLE_BUFFER, instant_no2_we_v);
       if(sample_buffer_idx == (sample_buffer_depth - 1)){
-        no2_ready = true;
+        no2_we_ready = true;
       }
     }
+
+    selectSlot3();  
+    if(burstSampleADC(&instant_no2_aux_v)){      
+      addSample(NO2_AUX_SAMPLE_BUFFER, instant_no2_aux_v);
+      if(sample_buffer_idx == (sample_buffer_depth - 1)){
+        no2_aux_ready = true;
+      }
+    }    
   }
     
   selectNoSlot(); 
@@ -5360,7 +5411,7 @@ float pressure_scale_factor(void){
   return ret;
 }
 
-void no2_convert_from_volts_to_ppb(float volts, float * converted_value, float * temperature_compensated_value){
+void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * converted_value, float * temperature_compensated_value){
   static boolean first_access = true;
   static float no2_zero_volts = 0.0f;
   static float no2_slope_ppb_per_volt = 0.0f;
@@ -5369,101 +5420,75 @@ void no2_convert_from_volts_to_ppb(float volts, float * converted_value, float *
   if(first_access){
     // NO2 has positive slope in circuit, more positive voltages correspond to higher levels of NO2
     no2_slope_ppb_per_volt = eeprom_read_float((const float *) EEPROM_NO2_CAL_SLOPE); 
-    no2_zero_volts = eeprom_read_float((const float *) EEPROM_NO2_CAL_OFFSET);
+    // no2_zero_volts = eeprom_read_float((const float *) EEPROM_NO2_CAL_OFFSET);
     first_access = false;
   }
-
-  // apply piecewise linear regressions
-  // to signal scaling effect curve
-  float scaling_slope = 0.0f;
-  float scaling_intercept = 0.0f;  
-  if(temperature_degc < 0.0f){                 // < 0C  
-    scaling_slope = 1.2251676453f;
-    scaling_intercept = 78.1252902858f;
-  }
-  else if(temperature_degc < 20.0f){           // 0C .. 20C   
-    scaling_slope = 1.0484934163f;
-    scaling_intercept = 78.4862696133f; 
-  }
-  else{                                        // > 20C   
-    scaling_slope = 0.6255065526f;
-    scaling_intercept = 87.1964488084f;
-  }
-  float signal_scaling_factor_at_temperature = ((scaling_slope * temperature_degc) + scaling_intercept)/100.0f;
-  // divide by 100 becauset the slope/intercept graphs have scaling factors in value of "%"
-
-  // apply piecewise linear regressions
-  // to baseline offset effect curve
-  float baseline_offset_ppm_slope = 0.0f;
-  float baseline_offset_ppm_intercept = 0.0f;
-                                                                     
-  if(temperature_degc < 5.0f){                          // < 5C
-    baseline_offset_ppm_slope = 0.0096303567f;
-    baseline_offset_ppm_intercept = 0.1451019634f;
-  }
-  else if(temperature_degc < 16.5f){                     // 5C .. 16.5C
-    baseline_offset_ppm_slope = 0.107934957f;
-    baseline_offset_ppm_intercept = -0.4613725299f;
-  }
-  else if(temperature_degc < 23.5f){                     // 16.5C .. 23.5C
-    baseline_offset_ppm_slope = 0.2160747618f;
-    baseline_offset_ppm_intercept = -2.186942354f;    
-  }
-  else if(temperature_degc < 32.0f){                     // 23.5C .. 32C
-    baseline_offset_ppm_slope = 0.3723989228f;
-    baseline_offset_ppm_intercept = -5.8469088214f;          
-  }
-  else{                                                  // > 32C
-    baseline_offset_ppm_slope = 0.5913110128f;
-    baseline_offset_ppm_intercept =  -13.0513308725f;        
-  }  
-  float baseline_offset_ppm_at_temperature = ((baseline_offset_ppm_slope * temperature_degc) + baseline_offset_ppm_intercept); 
-  float baseline_offset_ppb_at_temperature = baseline_offset_ppm_at_temperature * 1000.0f;
-  // multiply by 1000 because baseline offset graph shows NO2 in ppm  
-  float baseline_offset_voltage_at_temperature = baseline_offset_ppb_at_temperature / no2_slope_ppb_per_volt;
-
+    
   float signal_scaling_factor_at_altitude = pressure_scale_factor();
-
-  *converted_value = (volts - no2_zero_volts) * no2_slope_ppb_per_volt;
-  if(*converted_value <= 0.0f){
-    *converted_value = 0.0f; 
-  }
+  float we_baseline_offset_voltage_at_temperature = 0.0f; 
+  float aux_baseline_offset_voltage_at_temperature = 0.0f; 
                                    
-  if(valid_temperature_characterization(EEPROM_NO2_BASELINE_VOLTAGE_TABLE)){
+  if(valid_temperature_characterization(EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE)){
     // do the math a little differently in this case
     // first figure out what baseline_offset_voltage_at_temperature is based on the characterization
     // (1) find the first entry in the table where temperature_degc is >= the table temperature
     // (2) if no such entry exists, then it is colder than the coldest characterized temperature
     // (3) use the associated slope and intercept to determine baseline_offset_voltage_at_temperature
     //     using the formula baseline_offset_voltage_at_temperature = slope * temperature_degc + intercept
-    if(find_and_load_temperature_characterization_entry(EEPROM_NO2_BASELINE_VOLTAGE_TABLE, temperature_degc)){
+    if(find_and_load_temperature_characterization_entry(EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE, temperature_degc)){
       // great we have a useful entry in the table for this temperature, pull the slope and intercept
       // and use them to evaluate the baseline voltage at the current temperature
-      baseline_offset_voltage_at_temperature = 
+      we_baseline_offset_voltage_at_temperature = 
         temperature_degc * baseline_voltage_struct.slope_volts_per_degC + baseline_voltage_struct.intercept_volts;
     }
     else{
       // it's colder than the coldest characterized temperature
       // in this special case, instead of extrapolating, we will just evaluate the entry line
       // at coldest characterized temperature, and use that
-      load_temperature_characterization_entry(EEPROM_NO2_BASELINE_VOLTAGE_TABLE, 0);
-      baseline_offset_voltage_at_temperature = 
+      load_temperature_characterization_entry(EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE, 0);
+      we_baseline_offset_voltage_at_temperature = 
         baseline_voltage_struct.temperature_degC * baseline_voltage_struct.slope_volts_per_degC + baseline_voltage_struct.intercept_volts;
-    }
-
-    
-    // then do the math with that number, if we did the characterization properly, then 
-    // volts should always be *larger* than baseline_offset_voltage_at_temperature in the presense of NO2 gas
-    *temperature_compensated_value = (volts - baseline_offset_voltage_at_temperature) * no2_slope_ppb_per_volt 
-                                     / signal_scaling_factor_at_temperature 
-                                     / signal_scaling_factor_at_altitude;     
+    }  
   }
-  else{
-    // otherwise the static data-sheet based method prevails and we do the same math as before
-  *temperature_compensated_value = (volts - no2_zero_volts - baseline_offset_voltage_at_temperature) * no2_slope_ppb_per_volt 
-                                   / signal_scaling_factor_at_temperature 
-                                   / signal_scaling_factor_at_altitude;
-  } 
+
+  if(valid_temperature_characterization(EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE)){
+    // do the math a little differently in this case
+    // first figure out what baseline_offset_voltage_at_temperature is based on the characterization
+    // (1) find the first entry in the table where temperature_degc is >= the table temperature
+    // (2) if no such entry exists, then it is colder than the coldest characterized temperature
+    // (3) use the associated slope and intercept to determine baseline_offset_voltage_at_temperature
+    //     using the formula baseline_offset_voltage_at_temperature = slope * temperature_degc + intercept
+    if(find_and_load_temperature_characterization_entry(EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE, temperature_degc)){
+      // great we have a useful entry in the table for this temperature, pull the slope and intercept
+      // and use them to evaluate the baseline voltage at the current temperature
+      aux_baseline_offset_voltage_at_temperature = 
+        temperature_degc * baseline_voltage_struct.slope_volts_per_degC + baseline_voltage_struct.intercept_volts;
+    }
+    else{
+      // it's colder than the coldest characterized temperature
+      // in this special case, instead of extrapolating, we will just evaluate the entry line
+      // at coldest characterized temperature, and use that
+      load_temperature_characterization_entry(EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE, 0);
+      aux_baseline_offset_voltage_at_temperature = 
+        baseline_voltage_struct.temperature_degC * baseline_voltage_struct.slope_volts_per_degC + baseline_voltage_struct.intercept_volts;
+    }  
+  }
+
+  // then do the math with that number
+  float we_delta_vo = (we_volts - we_baseline_offset_voltage_at_temperature);
+  float aux_delta_vo = (aux_volts - aux_baseline_offset_voltage_at_temperature);
+  float we_delta_aux = we_delta_vo - aux_delta_vo;
+
+  // ppm calculated from the sensitivity constant (mV/ppm), corrected for offset voltage but not the auxiliary electrode.
+  *converted_value = we_delta_vo * no2_slope_ppb_per_volt;
+  if(*converted_value <= 0.0f){
+    *converted_value = 0.0f; 
+  }
+
+  // ppm, corrected for offset drift, and atmospheric pressure (altitude)
+  *temperature_compensated_value = we_delta_aux * no2_slope_ppb_per_volt 
+                                   / signal_scaling_factor_at_altitude;   
+  //                                   / signal_scaling_factor_at_temperature       // not characterized
 
   if(*temperature_compensated_value <= 0.0f){
     *temperature_compensated_value = 0.0f;
@@ -5473,39 +5498,50 @@ void no2_convert_from_volts_to_ppb(float volts, float * converted_value, float *
 boolean publishNO2(){
   clearTempBuffers();
   float converted_value = 0.0f, compensated_value = 0.0f;    
-  float no2_moving_average = calculateAverage(&(sample_buffer[NO2_SAMPLE_BUFFER][0]), sample_buffer_depth);
-  no2_convert_from_volts_to_ppb(no2_moving_average, &converted_value, &compensated_value);
+  float no2_we_moving_average = calculateAverage(&(sample_buffer[NO2_WE_SAMPLE_BUFFER][0]), sample_buffer_depth);
+  float no2_aux_moving_average = calculateAverage(&(sample_buffer[NO2_WE_SAMPLE_BUFFER][0]), sample_buffer_depth);
+  no2_convert_from_volts_to_ppb(no2_we_moving_average, no2_aux_moving_average, &converted_value, &compensated_value);
   no2_ppb = compensated_value;  
-  safe_dtostrf(no2_moving_average, -8, 6, raw_value_string, 16);
+  safe_dtostrf(no2_we_moving_average, -8, 6, raw_value_string, 16);
+  safe_dtostrf(no2_aux_moving_average, -8, 6, raw_value_string2, 16);
   safe_dtostrf(converted_value, -4, 2, converted_value_string, 16);
   safe_dtostrf(compensated_value, -4, 2, compensated_value_string, 16); 
-  safe_dtostrf(instant_no2_v, -8, 5, raw_instant_value_string, 16);
+  safe_dtostrf(instant_no2_we_v, -8, 5, raw_instant_value_string, 16);
+  safe_dtostrf(instant_no2_aux_v, -8, 5, raw_instant_value_string2, 16);
   
   trim_string(raw_value_string);
+  trim_string(raw_value_string2);
   trim_string(converted_value_string);
   trim_string(compensated_value_string);  
   trim_string(raw_instant_value_string);
+  trim_string(raw_instant_value_string2);
   
   replace_nan_with_null(raw_value_string);
+  replace_nan_with_null(raw_value_string2);
   replace_nan_with_null(converted_value_string);
   replace_nan_with_null(compensated_value_string);
   replace_nan_with_null(raw_instant_value_string);
+  replace_nan_with_null(raw_instant_value_string2);
   
   snprintf(scratch, 511, 
     "{"
     "\"serial-number\":\"%s\","       
-    "\"raw-value\":%s,"
+    "\"raw-value\":%s,"    
+    "\"raw-value2\":%s,"
     "\"raw-instant-value\":%s,"
+    "\"raw-instant-value2\":%s,"
     "\"raw-units\":\"volt\","
     "\"converted-value\":%s,"
     "\"converted-units\":\"ppb\","
     "\"compensated-value\":%s,"
-    "\"sensor-part-number\":\"3SP-NO2-20-PCB\""
+    "\"sensor-part-number\":\"NO2-B4-ISB\""
     "%s"
     "}",
     mqtt_client_id,
     raw_value_string, 
+    raw_value_string2, 
     raw_instant_value_string,
+    raw_instant_value_string2,
     converted_value_string, 
     compensated_value_string,
     gps_mqtt_string);  
@@ -5776,8 +5812,8 @@ void loop_wifi_mqtt_mode(void){
           updateLCD("XXX", 13, 0, 3);
         }
         
-        if(init_no2_afe_ok && init_no2_adc_ok){
-          if(no2_ready){
+        if(init_no2_we_afe_ok && init_no2_we_adc_ok && init_no2_aux_afe_ok && init_no2_aux_adc_ok){
+          if(no2_we_ready && no2_aux_ready){
             if(!publishNO2()){
               Serial.println(F("Error: Failed to publish NO2."));          
             }
@@ -5932,11 +5968,13 @@ void printCsvDataLine(){
   Serial.print(F(","));
   appendToString("," , dataString, &dataStringRemaining);
   
-  float no2_moving_average = 0.0f;
-  if(no2_ready){
+  float no2_we_moving_average = 0.0f;
+  float no2_aux_moving_average = 0.0f;
+  if(no2_we_ready && no2_aux_ready){
     float converted_value = 0.0f, compensated_value = 0.0f;    
-    no2_moving_average = calculateAverage(&(sample_buffer[NO2_SAMPLE_BUFFER][0]), sample_buffer_depth);
-    no2_convert_from_volts_to_ppb(no2_moving_average, &converted_value, &compensated_value);
+    no2_we_moving_average = calculateAverage(&(sample_buffer[NO2_WE_SAMPLE_BUFFER][0]), sample_buffer_depth);
+    no2_aux_moving_average = calculateAverage(&(sample_buffer[NO2_AUX_SAMPLE_BUFFER][0]), sample_buffer_depth);
+    no2_convert_from_volts_to_ppb(no2_we_moving_average, no2_aux_moving_average, &converted_value, &compensated_value);
     no2_ppb = compensated_value;      
     Serial.print(no2_ppb, 2);
     appendToString(no2_ppb, 2, dataString, &dataStringRemaining);
@@ -5966,8 +6004,14 @@ void printCsvDataLine(){
   Serial.print(F(","));
   appendToString("," , dataString, &dataStringRemaining);
   
-  Serial.print(no2_moving_average, 6);
-  appendToString(no2_moving_average, 6, dataString, &dataStringRemaining);
+  Serial.print(no2_we_moving_average, 6);
+  appendToString(no2_we_moving_average, 6, dataString, &dataStringRemaining);
+
+  Serial.print(F(","));
+  appendToString("," , dataString, &dataStringRemaining);
+  
+  Serial.print(no2_aux_moving_average, 6);
+  appendToString(no2_aux_moving_average, 6, dataString, &dataStringRemaining);
   
   Serial.print(F(","));
   appendToString("," , dataString, &dataStringRemaining);
