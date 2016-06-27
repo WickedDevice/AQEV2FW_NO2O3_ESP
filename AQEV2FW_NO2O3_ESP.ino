@@ -1151,10 +1151,98 @@ void initializeNewConfigSettings(void){
   
   boolean in_config_mode = false; 
   allowed_to_write_config_eeprom = true;
+
+  float tmp = eeprom_read_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);
+  if(isnan(tmp)){
+    configInject("aqe\r");    
+    configInject("no2_cross 0");
+    in_config_mode = true;    
+  }
   
-  // do stuff here as needed for OTA patches
+  // backlight settings
+  uint8_t backlight_startup = eeprom_read_byte((uint8_t *) EEPROM_BACKLIGHT_STARTUP);
+  uint16_t backlight_duration = eeprom_read_word((uint16_t *) EEPROM_BACKLIGHT_DURATION);
+  if((backlight_startup == 0xFF) || (backlight_duration == 0xFFFF)){
+      configInject("aqe\r");    
+      configInject("backlight initon\r");
+      configInject("backlight 60\r");
+      in_config_mode = true;
+  }
   
-  allowed_to_write_config_eeprom = false;  
+  // sampling settings
+  uint16_t l_sampling_interval = eeprom_read_word((uint16_t * ) EEPROM_SAMPLING_INTERVAL);
+  uint16_t l_reporting_interval = eeprom_read_word((uint16_t * ) EEPROM_REPORTING_INTERVAL);
+  uint16_t l_averaging_interval = eeprom_read_word((uint16_t * ) EEPROM_AVERAGING_INTERVAL);
+  if((l_sampling_interval == 0xFFFF) || (l_reporting_interval == 0xFFFF) || (l_averaging_interval == 0xFFFF)){
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }
+    configInject("sampling 5, 160, 5\r");    
+  }    
+
+  // the following two blocks of code are a 'hot-fix' to the slope calculation, 
+  // only apply it if the slope is not already self consistent with the sensitivity
+  float sensitivity = eeprom_read_float((const float *) EEPROM_O3_SENSITIVITY);  
+  float calculated_slope = convert_o3_sensitivity_to_slope(sensitivity);
+  float stored_slope = eeprom_read_float((const float *) EEPROM_O3_CAL_SLOPE);
+  if(calculated_slope != stored_slope){ 
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);  
+    snprintf(command_buf, 127, "o3_sen %8.4f\r", sensitivity);
+    configInject(command_buf);
+    configInject("backup o3\r");
+  }
+  
+  sensitivity = eeprom_read_float((const float *) EEPROM_NO2_SENSITIVITY);  
+  calculated_slope = convert_no2_sensitivity_to_slope(sensitivity);
+  stored_slope = eeprom_read_float((const float *) EEPROM_NO2_CAL_SLOPE);
+  if(calculated_slope != stored_slope){ 
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);  
+    snprintf(command_buf, 127, "no2_sen %8.4f\r", sensitivity);
+    configInject(command_buf);  
+    configInject("backup no2\r");
+  }  
+
+  // if necessary, initialize the default mqtt prefix
+  // if it's never been set, the first byte in memory will be 0xFF
+  uint8_t val = eeprom_read_byte((const uint8_t *) EEPROM_MQTT_TOPIC_PREFIX);  
+  if(val == 0xFF){
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);
+    strcat(command_buf, "mqttprefix ");
+    strcat(command_buf, MQTT_TOPIC_PREFIX);
+    strcat(command_buf, "\r");
+    configInject(command_buf);
+  }
+   
+  // if the mqtt suffix enable is neither zero nor one, set it to one (enabled)
+  val = eeprom_read_byte((const uint8_t *) EEPROM_MQTT_TOPIC_SUFFIX_ENABLED);  
+  if(val == 0xFF){
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);
+    strcat(command_buf, "mqttsuffix enable\r");        
+    configInject(command_buf);    
+  }
+  
+  if(in_config_mode){
+    configInject("exit\r");
+  }
+  
+  allowed_to_write_config_eeprom = false;        
 }
 
 boolean checkConfigIntegrity(void) {
@@ -5565,6 +5653,9 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
     o3_slope_ppb_per_volt = eeprom_read_float((const float *) EEPROM_O3_CAL_SLOPE);
     o3_zero_volts = eeprom_read_float((const float *) EEPROM_O3_CAL_OFFSET);
     no2_cross_sensitivity = eeprom_read_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);
+    if(isnan(no2_cross_sensitivity)){
+      no2_cross_sensitivity = 0.0f;
+    }
     first_access = false;
   }
 
