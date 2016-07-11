@@ -90,7 +90,7 @@ float gps_longitude = TinyGPS::GPS_INVALID_F_ANGLE;
 float gps_altitude = TinyGPS::GPS_INVALID_F_ALTITUDE;
 unsigned long gps_age = TinyGPS::GPS_INVALID_AGE;
 
-#define MAX_SAMPLE_BUFFER_DEPTH (240) // 20 minutes @ 5 second resolution
+#define MAX_SAMPLE_BUFFER_DEPTH (180) // 15 minutes @ 5 second resolution
 #define NO2_WE_SAMPLE_BUFFER      (0)
 #define NO2_AUX_SAMPLE_BUFFER     (1)
 #define O3_SAMPLE_BUFFER          (2)
