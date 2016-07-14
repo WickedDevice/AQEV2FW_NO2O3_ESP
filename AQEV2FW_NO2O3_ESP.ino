@@ -5558,18 +5558,18 @@ void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * conv
   }
 
   // then do the math with that number
-  float we_delta_vo = (we_volts - we_baseline_offset_voltage_at_temperature);
-  float aux_delta_vo = (aux_volts - aux_baseline_offset_voltage_at_temperature);
-  float we_delta_aux = we_delta_vo - aux_delta_vo;
+  float vo_delta_we  = (we_baseline_offset_voltage_at_temperature - we_volts);
+  float vo_delta_aux = (aux_baseline_offset_voltage_at_temperature - aux_volts);
+  float aux_delta_we = (vo_delta_aux - vo_delta_we);
 
   // ppm calculated from the sensitivity constant (mV/ppm), corrected for offset voltage but not the auxiliary electrode.
-  *converted_value = we_delta_vo * no2_slope_ppb_per_volt;
+  *converted_value = aux_delta_we * no2_slope_ppb_per_volt;
   if(*converted_value <= 0.0f){
     *converted_value = 0.0f; 
   }
 
   // ppm, corrected for offset drift, and atmospheric pressure (altitude)
-  *temperature_compensated_value = we_delta_aux * no2_slope_ppb_per_volt 
+  *temperature_compensated_value = aux_delta_we * no2_slope_ppb_per_volt 
                                    / signal_scaling_factor_at_altitude;   
   //                                   / signal_scaling_factor_at_temperature       // not characterized
 
