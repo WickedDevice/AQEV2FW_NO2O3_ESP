@@ -1531,7 +1531,7 @@ void help_menu(char * arg) {
       get_help_indent(); Serial.println(F("mqttauth - MQTT authentication enabled?"));      
       get_help_indent(); Serial.println(F("updatesrv - Update server name"));      
       get_help_indent(); Serial.println(F("updatefile - Update filename (no extension)"));          
-      Serial.println(F("      no2_sen - NO2 sensitivity [mV/ppm]"));
+      Serial.println(F("      no2_sen - NO2 sensitivity [mV/ppb]"));
       Serial.println(F("      no2_slope - NO2 sensors slope [ppb/V]"));
       Serial.println(F("      no2_off - NO2 sensors offset [V]"));
       Serial.println(F("      o3_sen - O3 sensitivity [nA/ppm]"));
@@ -3853,7 +3853,7 @@ void set_ntp_timezone_offset(char * arg){
   set_float_param(arg, (float *) EEPROM_NTP_TZ_OFFSET_HRS, NULL);
 }
 
-// convert from mV/ppm to ppb/V
+// convert from mV/ppb to ppb/V
 // M[V/ppb] = (1 / (Sensitivity[mV/ppb] * 10^-3[V/mV]))
 // M[V/ppb] = (1000.0 / Sensitivity[mV/ppb])
 // sensitivity constant (mV/ppb) provided by AlphaSense
