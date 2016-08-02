@@ -5709,12 +5709,7 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
   float baseline_offset_voltage_at_temperature = -1.0f * baseline_offset_ppb_at_temperature / o3_slope_ppb_per_volt;
   // multiply by -1 because the ppm curve goes negative but the voltage actually *increases*
 
-  float signal_scaling_factor_at_altitude = pressure_scale_factor();
-    
-  *converted_value = (o3_zero_volts - volts) * o3_slope_ppb_per_volt;
-  if(*converted_value <= 0.0f){
-    *converted_value = 0.0f; 
-  }
+  float signal_scaling_factor_at_altitude = pressure_scale_factor();     
 
   if(valid_temperature_characterization(EEPROM_O3_BASELINE_VOLTAGE_TABLE)){
     // do the math a little differently in this case
@@ -5752,7 +5747,12 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
                                    / signal_scaling_factor_at_altitude;                                    
   }    
 
-  *temperature_compensated_value -= no2_cross_sensitivity * no2_ppb; // account for cross-sensitivity to no2
+  *converted_value = *temperature_compensated_value;
+  if(*converted_value <= 0.0f){
+    *converted_value = 0.0f; 
+  }
+
+  *temperature_compensated_value -= (no2_cross_sensitivity / 100.0f) * no2_ppb; // account for cross-sensitivity to no2, which is 0..100%
                                    
   if(*temperature_compensated_value <= 0.0f){
     *temperature_compensated_value = 0.0f;
