@@ -199,11 +199,19 @@ uint8_t mode = MODE_OPERATIONAL;
 #define EEPROM_MQTT_TOPIC_SUFFIX_ENABLED  (EEPROM_O3_BASELINE_VOLTAGE_TABLE - 1)  
 #define EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE (EEPROM_MQTT_TOPIC_SUFFIX_ENABLED - (5*sizeof(baseline_voltage_t))) // array of (up to) five structures for baseline offset characterization over temperature
 #define EEPROM_NO2_CROSS_SENSITIVITY (EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE - 4) // the cross-sensitivity of the Ozone sensor to NO2, a % between 0 and 100
+#define EEPROM_NO2_FINAL_SCALING (EEPROM_NO2_CROSS_SENSITIVITY  - 4) // final compensated no2 ppb will be multiplied by this value (first)
+#define EEPROM_NO2_FINAL_OFFSET  (EEPROM_NO2_FINAL_SCALING  - 4)     // this value will be added to the final compensated no2 ppb (after final scaling, second)
+#define EEPROM_O3_FINAL_SCALING (EEPROM_NO2_FINAL_OFFSET  - 4)       // final compensated o3 ppb will be multiplied by this value (first)
+#define EEPROM_O3_FINAL_OFFSET  (EEPROM_NO2_FINAL_SCALING  - 4)      // this value will be added to the final compensated o3 ppb (after final scaling, second)
 //  /\
 //   L Add values up here by subtracting offsets to previously added values
 //   * ... and make sure the addresses don't collide and start overlapping!
 //   T Add values down here by adding offsets to previously added values
 //  \/
+#define EEPROM_BACKUP_O3_FINAL_OFFSET   (EEPROM_BACKUP_O3_FINAL_SCALING + 4)
+#define EEPROM_BACKUP_O3_FINAL_SCALING  (EEPROM_BACKUP_NO2_FINAL_OFFSET + 4)
+#define EEPROM_BACKUP_NO2_FINAL_OFFSET   (EEPROM_BACKUP_NO2_FINAL_SCALING + 4)
+#define EEPROM_BACKUP_NO2_FINAL_SCALING  (EEPROM_BACKUP_NO2_CROSS_SENSITIVITY + 4)
 #define EEPROM_BACKUP_NO2_CROSS_SENSITIVITY (EEPROM_BACKUP_NTP_TZ_OFFSET_HRS + 4)
 #define EEPROM_BACKUP_NTP_TZ_OFFSET_HRS  (EEPROM_BACKUP_HUMIDITY_OFFSET + 4)
 #define EEPROM_BACKUP_HUMIDITY_OFFSET    (EEPROM_BACKUP_TEMPERATURE_OFFSET + 4)
@@ -289,6 +297,10 @@ void no2_aux_baseline_voltage_characterization_command(char * arg);
 void o3_baseline_voltage_characterization_command(char * arg);
 void topic_suffix_config(char * arg);
 void no2_cross_sensitivity(char * arg);
+void no2_final_offset(char * arg);
+void no2_final_scaling(char * arg);
+void o3_final_offset(char * arg);
+void o3_final_scaling(char * arg);
 
 // Note to self:
 //   When implementing a new parameter, ask yourself:
@@ -354,6 +366,10 @@ const char cmd_string_no2_we_blv[] PROGMEM  = "no2we_blv  ";
 const char cmd_string_no2_aux_blv[] PROGMEM = "no2aux_blv ";
 const char cmd_string_o3_blv[] PROGMEM      = "o3_blv     ";
 const char cmd_string_no2_xsen[] PROGMEM    = "no2_cross  ";
+const char cmd_string_no2_final_offset[] PROGMEM  = "no2_foff   ";
+const char cmd_string_no2_final_scaling[] PROGMEM = "no2_fscale ";
+const char cmd_string_o3_final_offset[] PROGMEM   = "o3_foff    ";
+const char cmd_string_o3_final_scaling[] PROGMEM  = "o3_fscale  ";
 const char cmd_string_null[] PROGMEM        = "";
 
 
@@ -404,6 +420,10 @@ PGM_P const commands[] PROGMEM = {
   cmd_string_no2_aux_blv,
   cmd_string_o3_blv, 
   cmd_string_no2_xsen,
+  cmd_string_no2_final_offset,
+  cmd_string_no2_final_scaling,
+  cmd_string_o3_final_offset,
+  cmd_string_o3_final_scaling,
   cmd_string_null
 };
 
@@ -454,6 +474,10 @@ void (*command_functions[])(char * arg) = {
   no2_aux_baseline_voltage_characterization_command,
   o3_baseline_voltage_characterization_command,
   no2_cross_sensitivity,
+  no2_final_offset,
+  no2_final_scaling,
+  o3_final_offset,
+  o3_final_scaling,
   0
 };
 
@@ -1237,7 +1261,51 @@ void initializeNewConfigSettings(void){
     strcat(command_buf, "mqttsuffix enable\r");        
     configInject(command_buf);    
   }
-  
+
+  uint32_t l_tmp = eeprom_read_dword((const uint32_t *) EEPROM_NO2_FINAL_OFFSET);
+  if(l_tmp == 0xFFFFFFFF){
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);
+    strcat(command_buf, "no2_foff 0.0\r");        
+    configInject(command_buf);      
+  }
+
+  l_tmp = eeprom_read_dword((const uint32_t *) EEPROM_NO2_FINAL_SCALING);
+  if(l_tmp == 0xFFFFFFFF){
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);
+    strcat(command_buf, "no2_fscale 1.0\r");        
+    configInject(command_buf);      
+  }
+
+  l_tmp = eeprom_read_dword((const uint32_t *) EEPROM_O3_FINAL_OFFSET);
+  if(l_tmp == 0xFFFFFFFF){
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);
+    strcat(command_buf, "o3_foff 0.0\r");        
+    configInject(command_buf);      
+  }
+
+  l_tmp = eeprom_read_dword((const uint32_t *) EEPROM_O3_FINAL_SCALING);
+  if(l_tmp == 0xFFFFFFFF){
+    if(!in_config_mode){
+      configInject("aqe\r");
+      in_config_mode = true;
+    }    
+    memset(command_buf, 0, 128);
+    strcat(command_buf, "o3_fscale 1.0\r");        
+    configInject(command_buf);      
+  }
+   
   if(in_config_mode){
     configInject("exit\r");
   }
@@ -1534,10 +1602,14 @@ void help_menu(char * arg) {
       Serial.println(F("      no2_sen - NO2 sensitivity [mV/ppb]"));
       Serial.println(F("      no2_slope - NO2 sensors slope [ppb/V]"));
       Serial.println(F("      no2_off - NO2 sensors offset [V]"));
+      Serial.println(F("      no2_foff - NO2 final offset [ppb]"));
+      Serial.println(F("      no2_fscale - NO2 final scaling [ppb/ppb]"));
       Serial.println(F("      o3_sen - O3 sensitivity [nA/ppm]"));
       Serial.println(F("      o3_slope - O3 sensors slope [ppb/V]"));
       Serial.println(F("      o3_off - O3 sensors offset [V]"));
       Serial.println(F("      no2_cross - O3 cross-sensitivty to NO2 [% 0..100]"));
+      Serial.println(F("      o3_foff - O3 final offset [ppb]"));
+      Serial.println(F("      o3_fscale - O3 final scaling [ppb/ppb]"));      
       get_help_indent(); Serial.println(F("temp_off - Temperature sensor reporting offset [degC] (subtracted)"));
       get_help_indent(); Serial.println(F("hum_off - Humidity sensor reporting offset [%] (subtracted)"));      
       get_help_indent(); Serial.println(F("key - lol, sorry, that's also not happening!"));
@@ -1805,6 +1877,22 @@ void help_menu(char * arg) {
       Serial.println(F("no2_cross <number>"));
       get_help_indent(); Serial.println(F("<number> is the decimal value of Ozone cross-sensitivity to NO2 [% 0..100]"));      
     }    
+    else if (strncmp("no2_foff", arg, 8) == 0) {
+      Serial.println(F("no2_foff <number>"));
+      get_help_indent(); Serial.println(F("<number> is the decimal value of NO2 Final Offset value [ppb] (applied after final scaling)"));      
+    }        
+    else if (strncmp("o3_foff", arg, 7) == 0) {
+      Serial.println(F("o3_foff <number>"));
+      get_help_indent(); Serial.println(F("<number> is the decimal value of O3 Final Offset value [ppb] (applied after final scaling)"));      
+    }            
+    else if (strncmp("no2_fscale", arg, 10) == 0) {
+      Serial.println(F("no2_fscale <number>"));
+      get_help_indent(); Serial.println(F("<number> is the decimal value of NO2 Final Scaling value [ppb/ppb] (applied prior to final offset)"));      
+    }            
+    else if (strncmp("o3_fscale", arg, 9) == 0) {
+      Serial.println(F("o3_fscale <number>"));
+      get_help_indent(); Serial.println(F("<number> is the decimal value of O3 Final Scaling value [ppb/ppb] (applied prior to final offset)"));      
+    }                
     else if (strncmp("temp_off", arg, 8) == 0) {
       Serial.println(F("temp_off <number>"));
       get_help_indent(); Serial.println(F("<number> is the decimal value of Temperature sensor reporting offset [degC] (subtracted)"));
@@ -2236,6 +2324,18 @@ void print_eeprom_value(char * arg) {
   else if (strncmp(arg, "no2_cross", 9) == 0) {
     print_eeprom_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);
   }  
+  else if (strncmp(arg, "no2_foff", 8) == 0) {
+    print_eeprom_float((const float *) EEPROM_NO2_FINAL_OFFSET);
+  }  
+  else if (strncmp(arg, "no2_fscale", 10) == 0) {
+    print_eeprom_float((const float *) EEPROM_NO2_FINAL_SCALING);
+  }      
+  else if (strncmp(arg, "o3_foff", 7) == 0) {
+    print_eeprom_float((const float *) EEPROM_O3_FINAL_OFFSET);
+  }  
+  else if (strncmp(arg, "o3_fscale", 9) == 0) {
+    print_eeprom_float((const float *) EEPROM_O3_FINAL_SCALING);
+  }        
   else if (strncmp(arg, "temp_off", 8) == 0) {
     print_eeprom_float((const float *) EEPROM_TEMPERATURE_OFFSET);
   }
@@ -2373,6 +2473,10 @@ void print_eeprom_value(char * arg) {
     print_eeprom_float((const float *) EEPROM_NO2_CAL_SLOPE);
     print_label_with_star_if_not_backed_up("NO2 Offset [V]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_NO2_CAL_OFFSET);
+    print_label_with_star_if_not_backed_up("NO2 Final Scaling [ppb/ppb]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
+    print_eeprom_float((const float *) EEPROM_NO2_FINAL_SCALING);
+    print_label_with_star_if_not_backed_up("NO2 Final Offset [ppb]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
+    print_eeprom_float((const float *) EEPROM_NO2_FINAL_OFFSET);       
     Serial.print(F("    ")); Serial.println(F("NO2 Baseline Voltage WE Characterization:"));
     print_baseline_voltage_characterization(EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE);
     Serial.print(F("    ")); Serial.println(F("NO2 Baseline Voltage Aux Characterization:"));
@@ -2386,6 +2490,10 @@ void print_eeprom_value(char * arg) {
     print_eeprom_float((const float *) EEPROM_O3_CAL_OFFSET);
     print_label_with_star_if_not_backed_up("NO2 Cross-Sensitivity [%]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_NO2_CROSS_SENSITIVITY);    
+    print_label_with_star_if_not_backed_up("O3 Final Scaling [ppb/ppb]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
+    print_eeprom_float((const float *) EEPROM_O3_FINAL_SCALING);
+    print_label_with_star_if_not_backed_up("O3 Final Offset [ppb]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
+    print_eeprom_float((const float *) EEPROM_O3_FINAL_OFFSET);    
     Serial.print(F("    ")); Serial.println(F("O3 Baseline Voltage Characterization:"));
     print_baseline_voltage_characterization(EEPROM_O3_BASELINE_VOLTAGE_TABLE);
     
@@ -2587,8 +2695,12 @@ void restore(char * arg) {
     eeprom_write_block(tmp, (void *) EEPROM_O3_CAL_SLOPE, 4);
     eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_O3_CAL_OFFSET, 4);
     eeprom_write_block(tmp, (void *) EEPROM_O3_CAL_OFFSET, 4);
-    eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_NO2_CROSS_SENSITIVITY, 4);
+    eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_NO2_CROSS_SENSITIVITY, 4);  
     eeprom_write_block(tmp, (void *) EEPROM_NO2_CROSS_SENSITIVITY, 4);    
+    eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_O3_FINAL_SCALING, 4);  
+    eeprom_write_block(tmp, (void *) EEPROM_O3_FINAL_SCALING, 4);    
+    eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_O3_FINAL_OFFSET, 4);  
+    eeprom_write_block(tmp, (void *) EEPROM_O3_FINAL_OFFSET, 4);    
   }
   else if (strncmp("temp_off", arg, 8) == 0) {
     if (!BIT_IS_CLEARED(backup_check, BACKUP_STATUS_TEMPERATURE_CALIBRATION_BIT)) {
@@ -3742,6 +3854,10 @@ void backup(char * arg) {
     eeprom_write_block(tmp, (void *) EEPROM_BACKUP_NO2_CAL_SLOPE, 4);
     eeprom_read_block(tmp, (const void *) EEPROM_NO2_CAL_OFFSET, 4);
     eeprom_write_block(tmp, (void *) EEPROM_BACKUP_NO2_CAL_OFFSET, 4);
+    eeprom_read_block(tmp, (const void *) EEPROM_NO2_FINAL_SCALING, 4);
+    eeprom_write_block(tmp, (void *) EEPROM_BACKUP_NO2_FINAL_SCALING, 4);
+    eeprom_read_block(tmp, (const void *) EEPROM_NO2_FINAL_OFFSET, 4);
+    eeprom_write_block(tmp, (void *) EEPROM_BACKUP_NO2_FINAL_OFFSET, 4);   
 
     if (!BIT_IS_CLEARED(backup_check, BACKUP_STATUS_NO2_CALIBRATION_BIT)) {
       CLEAR_BIT(backup_check, BACKUP_STATUS_NO2_CALIBRATION_BIT);
@@ -3757,6 +3873,10 @@ void backup(char * arg) {
     eeprom_write_block(tmp, (void *) EEPROM_BACKUP_O3_CAL_OFFSET, 4);
     eeprom_read_block(tmp, (const void *) EEPROM_NO2_CROSS_SENSITIVITY, 4);
     eeprom_write_block(tmp, (void *) EEPROM_BACKUP_NO2_CROSS_SENSITIVITY, 4);
+    eeprom_read_block(tmp, (const void *) EEPROM_O3_FINAL_SCALING, 4);
+    eeprom_write_block(tmp, (void *) EEPROM_BACKUP_O3_FINAL_SCALING, 4);
+    eeprom_read_block(tmp, (const void *) EEPROM_O3_FINAL_OFFSET, 4);
+    eeprom_write_block(tmp, (void *) EEPROM_BACKUP_O3_FINAL_OFFSET, 4);   
     
     if (!BIT_IS_CLEARED(backup_check, BACKUP_STATUS_O3_CALIBRATION_BIT)) {
       CLEAR_BIT(backup_check, BACKUP_STATUS_O3_CALIBRATION_BIT);
@@ -3879,6 +3999,22 @@ void set_no2_offset(char * arg) {
 
 void no2_cross_sensitivity(char * arg){
   set_float_param(arg, (float *) EEPROM_NO2_CROSS_SENSITIVITY, 0);
+}
+
+void no2_final_offset(char * arg){
+  set_float_param(arg, (float *) EEPROM_NO2_FINAL_OFFSET, 0);
+}
+
+void no2_final_scaling(char * arg){
+  set_float_param(arg, (float *) EEPROM_NO2_FINAL_SCALING, 0);
+}
+
+void o3_final_offset(char * arg){
+  set_float_param(arg, (float *) EEPROM_O3_FINAL_OFFSET, 0);
+}
+
+void o3_final_scaling(char * arg){
+  set_float_param(arg, (float *) EEPROM_O3_FINAL_SCALING, 0);
 }
 
 void set_reported_temperature_offset(char * arg) {
@@ -5502,12 +5638,19 @@ void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * conv
   static boolean first_access = true;
   static float no2_zero_volts = 0.0f;
   static float no2_slope_ppb_per_volt = 0.0f;
+  static float no2_final_scaling = 1.0f;
+  static float no2_final_offset = 0.0f;
+  
   float temperature_coefficient_of_span = 0.0f;
   float temperatureresmpensated_slope = 0.0f;
   if(first_access){
     // NO2 has positive slope in circuit, more positive voltages correspond to higher levels of NO2
     no2_slope_ppb_per_volt = eeprom_read_float((const float *) EEPROM_NO2_CAL_SLOPE); 
     // no2_zero_volts = eeprom_read_float((const float *) EEPROM_NO2_CAL_OFFSET);
+
+    no2_final_scaling = eeprom_read_float((const float *) EEPROM_NO2_FINAL_SCALING); 
+    no2_final_offset = eeprom_read_float((const float *) EEPROM_NO2_FINAL_OFFSET); 
+    
     first_access = false;
   }
     
@@ -5576,6 +5719,9 @@ void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * conv
   *temperature_compensated_value = aux_delta_we * no2_slope_ppb_per_volt 
                                    / signal_scaling_factor_at_altitude;   
   //                                   / signal_scaling_factor_at_temperature       // not characterized
+
+  *temperature_compensated_value *= no2_final_scaling;
+  *temperature_compensated_value += no2_final_offset;  
 
   if(*temperature_compensated_value <= 0.0f){
     *temperature_compensated_value = 0.0f;
@@ -5649,6 +5795,8 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
   static float o3_zero_volts = 0.0f;
   static float o3_slope_ppb_per_volt = 0.0f;
   static float no2_cross_sensitivity = 0.0f;
+  static float o3_final_scaling = 1.0f;
+  static float o3_final_offset = 0.0f;
   
   float temperature_coefficient_of_span = 0.0f;
   float temperature_compensated_slope = 0.0f;  
@@ -5660,6 +5808,9 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
     if(isnan(no2_cross_sensitivity)){
       no2_cross_sensitivity = 0.0f;
     }
+    o3_final_scaling = eeprom_read_float((const float *) EEPROM_O3_FINAL_SCALING);
+    o3_final_offset = eeprom_read_float((const float *) EEPROM_O3_FINAL_OFFSET);
+        
     first_access = false;
   }
 
@@ -5757,6 +5908,9 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
   }
 
   *temperature_compensated_value -= (no2_cross_sensitivity / 100.0f) * no2_ppb; // account for cross-sensitivity to no2, which is 0..100%
+
+  *temperature_compensated_value *= o3_final_scaling;
+  *temperature_compensated_value += o3_final_offset;
                                    
   if(*temperature_compensated_value <= 0.0f){
     *temperature_compensated_value = 0.0f;
