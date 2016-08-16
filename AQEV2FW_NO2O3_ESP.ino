@@ -203,6 +203,8 @@ uint8_t mode = MODE_OPERATIONAL;
 #define EEPROM_NO2_FINAL_OFFSET  (EEPROM_NO2_FINAL_SCALING  - 4)     // this value will be added to the final compensated no2 ppb (after final scaling, second)
 #define EEPROM_O3_FINAL_SCALING (EEPROM_NO2_FINAL_OFFSET  - 4)       // final compensated o3 ppb will be multiplied by this value (first)
 #define EEPROM_O3_FINAL_OFFSET  (EEPROM_NO2_FINAL_SCALING  - 4)      // this value will be added to the final compensated o3 ppb (after final scaling, second)
+#define EEPROM_NO2_ZERO_NEGATIVE_RESULTS (EEPROM_O3_FINAL_OFFSET - 1)          // whether negative values should be reported as zero for no2
+#define EEPROM_O3_ZERO_NEGATIVE_RESULTS (EEPROM_NO2_ZERO_NEGATIVE_RESULTS - 1) // whether negative values should be reported as zero for o3
 //  /\
 //   L Add values up here by subtracting offsets to previously added values
 //   * ... and make sure the addresses don't collide and start overlapping!
@@ -301,6 +303,8 @@ void no2_final_offset(char * arg);
 void no2_final_scaling(char * arg);
 void o3_final_offset(char * arg);
 void o3_final_scaling(char * arg);
+void no2_negz(char * arg);
+void o3_negz(char * arg);
 
 // Note to self:
 //   When implementing a new parameter, ask yourself:
@@ -370,6 +374,8 @@ const char cmd_string_no2_final_offset[] PROGMEM  = "no2_foff   ";
 const char cmd_string_no2_final_scaling[] PROGMEM = "no2_fscale ";
 const char cmd_string_o3_final_offset[] PROGMEM   = "o3_foff    ";
 const char cmd_string_o3_final_scaling[] PROGMEM  = "o3_fscale  ";
+const char cmd_string_no2_negz[] PROGMEM          = "no2_negz   ";
+const char cmd_string_o3_negz[] PROGMEM           = "o3_negz    ";
 const char cmd_string_null[] PROGMEM        = "";
 
 
@@ -424,6 +430,8 @@ PGM_P const commands[] PROGMEM = {
   cmd_string_no2_final_scaling,
   cmd_string_o3_final_offset,
   cmd_string_o3_final_scaling,
+  cmd_string_no2_negz,
+  cmd_string_o3_negz,
   cmd_string_null
 };
 
@@ -478,6 +486,8 @@ void (*command_functions[])(char * arg) = {
   no2_final_scaling,
   o3_final_offset,
   o3_final_scaling,
+  no2_negz,
+  o3_negz,
   0
 };
 
@@ -1667,6 +1677,8 @@ void help_menu(char * arg) {
       defaults_help_indent(); Serial.println(F("restore key"));
       defaults_help_indent(); Serial.println(F("'restore no2'"));
       defaults_help_indent(); Serial.println(F("'restore o3'"));          
+      defaults_help_indent(); Serial.println(F("'no2_negz'")); 
+      defaults_help_indent(); Serial.println(F("'o3_negz'")); 
       defaults_help_indent(); Serial.println(F("clears the SSID from memory"));
       defaults_help_indent(); Serial.println(F("clears the Network Password from memory"));
       get_help_indent(); Serial.println(F("mac        - retrieves the mac address from BACKUP"));
@@ -1892,6 +1904,14 @@ void help_menu(char * arg) {
     else if (strncmp("o3_fscale", arg, 9) == 0) {
       Serial.println(F("o3_fscale <number>"));
       get_help_indent(); Serial.println(F("<number> is the decimal value of O3 Final Scaling value [ppb/ppb] (applied prior to final offset)"));      
+    }                
+    else if (strncmp("no2_negz", arg, 8) == 0) {
+      Serial.println(F("no2_negz <number>"));
+      get_help_indent(); Serial.println(F("if <number> is 0, negative results are allowed to be reported, any other number (e.g. 1) reports negative values as 0"));      
+    }        
+    else if (strncmp("o3_negz", arg, 7) == 0) {
+      Serial.println(F("o3_negz <number>"));
+      get_help_indent(); Serial.println(F("if <number> is 0, negative results are allowed to be reported, any other number (e.g. 1) reports negative values as 0"));         
     }                
     else if (strncmp("temp_off", arg, 8) == 0) {
       Serial.println(F("temp_off <number>"));
@@ -2336,6 +2356,12 @@ void print_eeprom_value(char * arg) {
   else if (strncmp(arg, "o3_fscale", 9) == 0) {
     print_eeprom_float((const float *) EEPROM_O3_FINAL_SCALING);
   }        
+  else if (strncmp(arg, "no2_negz", 8) == 0) {
+    Serial.println(eeprom_read_byte((const uint8_t *) EEPROM_NO2_ZERO_NEGATIVE_RESULTS));
+  }      
+  else if (strncmp(arg, "o3_negz", 7) == 0) {
+    Serial.println(eeprom_read_byte((const uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS));
+  } 
   else if (strncmp(arg, "temp_off", 8) == 0) {
     print_eeprom_float((const float *) EEPROM_TEMPERATURE_OFFSET);
   }
@@ -2477,11 +2503,18 @@ void print_eeprom_value(char * arg) {
     print_eeprom_float((const float *) EEPROM_NO2_FINAL_SCALING);
     print_label_with_star_if_not_backed_up("NO2 Final Offset [ppb]: ", BACKUP_STATUS_NO2_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_NO2_FINAL_OFFSET);       
+    Serial.print(F("    ")); Serial.print(F("NO2 Report Negatives value as zero: "));
+    if(eeprom_read_byte((const uint8_t *) EEPROM_NO2_ZERO_NEGATIVE_RESULTS)){
+      Serial.println(F("yes"));
+    }
+    else{
+      Serial.println(F("no"));
+    }
     Serial.print(F("    ")); Serial.println(F("NO2 Baseline Voltage WE Characterization:"));
     print_baseline_voltage_characterization(EEPROM_NO2_WE_BASELINE_VOLTAGE_TABLE);
     Serial.print(F("    ")); Serial.println(F("NO2 Baseline Voltage Aux Characterization:"));
     print_baseline_voltage_characterization(EEPROM_NO2_AUX_BASELINE_VOLTAGE_TABLE);
-    
+
     print_label_with_star_if_not_backed_up("O3 Sensitivity [nA/ppm]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_O3_SENSITIVITY);
     print_label_with_star_if_not_backed_up("O3 Slope [ppb/V]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
@@ -2494,6 +2527,13 @@ void print_eeprom_value(char * arg) {
     print_eeprom_float((const float *) EEPROM_O3_FINAL_SCALING);
     print_label_with_star_if_not_backed_up("O3 Final Offset [ppb]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_O3_FINAL_OFFSET);    
+    Serial.print(F("    ")); Serial.print(F("NO2 Report Negatives value as zero: "));
+    if(eeprom_read_byte((const uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS)){
+      Serial.println(F("yes"));
+    }
+    else{
+      Serial.println(F("no"));
+    }    
     Serial.print(F("    ")); Serial.println(F("O3 Baseline Voltage Characterization:"));
     print_baseline_voltage_characterization(EEPROM_O3_BASELINE_VOLTAGE_TABLE);
     
@@ -2594,6 +2634,8 @@ void restore(char * arg) {
     configInject("restore no2\r");
     configInject("restore o3\r");
     configInject("restore mac\r");
+    configInject("no2_negz 0\r");
+    configInject("o3_negz 0\r");
 
     eeprom_write_block(blank, (void *) EEPROM_SSID, 32); // clear the SSID
     eeprom_write_block(blank, (void *) EEPROM_NETWORK_PWD, 32); // clear the Network Password
@@ -4015,6 +4057,24 @@ void o3_final_offset(char * arg){
 
 void o3_final_scaling(char * arg){
   set_float_param(arg, (float *) EEPROM_O3_FINAL_SCALING, 0);
+}
+
+void no2_negz(char * arg){
+  if(strcmp(arg, "0") == 0){
+    eeprom_write_byte((uint8_t *) EEPROM_NO2_ZERO_NEGATIVE_RESULTS, 0);
+  }
+  else{
+    eeprom_write_byte((uint8_t *) EEPROM_NO2_ZERO_NEGATIVE_RESULTS, 1);
+  }
+}
+
+void o3_negz(char * arg){
+  if(strcmp(arg, "0") == 0){
+    eeprom_write_byte((uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS, 0);
+  }
+  else{
+    eeprom_write_byte((uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS, 1);
+  }  
 }
 
 void set_reported_temperature_offset(char * arg) {
@@ -5640,6 +5700,7 @@ void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * conv
   static float no2_slope_ppb_per_volt = 0.0f;
   static float no2_final_scaling = 1.0f;
   static float no2_final_offset = 0.0f;
+  static boolean no2_report_neg_as_zero = true;
   
   float temperature_coefficient_of_span = 0.0f;
   float temperatureresmpensated_slope = 0.0f;
@@ -5650,7 +5711,7 @@ void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * conv
 
     no2_final_scaling = eeprom_read_float((const float *) EEPROM_NO2_FINAL_SCALING); 
     no2_final_offset = eeprom_read_float((const float *) EEPROM_NO2_FINAL_OFFSET); 
-    
+    no2_report_neg_as_zero = eeprom_read_byte((const uint8_t *) EEPROM_NO2_ZERO_NEGATIVE_RESULTS) ? true : false;
     first_access = false;
   }
     
@@ -5711,7 +5772,7 @@ void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * conv
 
   // ppm calculated from the sensitivity constant (mV/ppm), corrected for offset voltage but not the auxiliary electrode.
   *converted_value = aux_delta_we * no2_slope_ppb_per_volt;
-  if(*converted_value <= 0.0f){
+  if(no2_report_neg_as_zero && (*converted_value <= 0.0f)){
     *converted_value = 0.0f; 
   }
 
@@ -5723,7 +5784,7 @@ void no2_convert_from_volts_to_ppb(float we_volts, float aux_volts, float * conv
   *temperature_compensated_value *= no2_final_scaling;
   *temperature_compensated_value += no2_final_offset;  
 
-  if(*temperature_compensated_value <= 0.0f){
+  if(no2_report_neg_as_zero && (*temperature_compensated_value <= 0.0f)){
     *temperature_compensated_value = 0.0f;
   }
 }
@@ -5797,6 +5858,7 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
   static float no2_cross_sensitivity = 0.0f;
   static float o3_final_scaling = 1.0f;
   static float o3_final_offset = 0.0f;
+  static boolean o3_report_neg_as_zero = true;
   
   float temperature_coefficient_of_span = 0.0f;
   float temperature_compensated_slope = 0.0f;  
@@ -5810,7 +5872,7 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
     }
     o3_final_scaling = eeprom_read_float((const float *) EEPROM_O3_FINAL_SCALING);
     o3_final_offset = eeprom_read_float((const float *) EEPROM_O3_FINAL_OFFSET);
-        
+    o3_report_neg_as_zero = eeprom_read_byte((const uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS) ? true : false;    
     first_access = false;
   }
 
@@ -5903,7 +5965,7 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
   }    
 
   *converted_value = *temperature_compensated_value;
-  if(*converted_value <= 0.0f){
+  if(o3_report_neg_as_zero && (*converted_value <= 0.0f)){
     *converted_value = 0.0f; 
   }
 
@@ -5912,7 +5974,7 @@ void o3_convert_from_volts_to_ppb(float volts, float * converted_value, float * 
   *temperature_compensated_value *= o3_final_scaling;
   *temperature_compensated_value += o3_final_offset;
                                    
-  if(*temperature_compensated_value <= 0.0f){
+  if(o3_report_neg_as_zero && (*temperature_compensated_value <= 0.0f)){
     *temperature_compensated_value = 0.0f;
   }
 }
