@@ -202,7 +202,7 @@ uint8_t mode = MODE_OPERATIONAL;
 #define EEPROM_NO2_FINAL_SCALING (EEPROM_NO2_CROSS_SENSITIVITY  - 4) // final compensated no2 ppb will be multiplied by this value (first)
 #define EEPROM_NO2_FINAL_OFFSET  (EEPROM_NO2_FINAL_SCALING  - 4)     // this value will be added to the final compensated no2 ppb (after final scaling, second)
 #define EEPROM_O3_FINAL_SCALING (EEPROM_NO2_FINAL_OFFSET  - 4)       // final compensated o3 ppb will be multiplied by this value (first)
-#define EEPROM_O3_FINAL_OFFSET  (EEPROM_NO2_FINAL_SCALING  - 4)      // this value will be added to the final compensated o3 ppb (after final scaling, second)
+#define EEPROM_O3_FINAL_OFFSET  (EEPROM_O3_FINAL_SCALING  - 4)      // this value will be added to the final compensated o3 ppb (after final scaling, second)
 #define EEPROM_NO2_ZERO_NEGATIVE_RESULTS (EEPROM_O3_FINAL_OFFSET - 1)          // whether negative values should be reported as zero for no2
 #define EEPROM_O3_ZERO_NEGATIVE_RESULTS (EEPROM_NO2_ZERO_NEGATIVE_RESULTS - 1) // whether negative values should be reported as zero for o3
 //  /\
@@ -2026,12 +2026,12 @@ void print_eeprom_connect_method(void) {
 }
 
 boolean valid_ssid_config(void) {
-  char ssid[32] = {0};
+  char ssid[33] = {0};
   boolean ssid_contains_only_printables = true;
 
   uint8_t connect_method = eeprom_read_byte((const uint8_t *) EEPROM_CONNECT_METHOD);    
-  eeprom_read_block(ssid, (const void *) EEPROM_SSID, 31);
-  for (uint8_t ii = 0; ii < 32; ii++) {
+  eeprom_read_block(ssid, (const void *) EEPROM_SSID, 32);
+  for (uint8_t ii = 0; ii <= 32; ii++) {
     if (ssid[ii] == '\0') {
       break;
     }
@@ -2049,8 +2049,8 @@ boolean valid_ssid_config(void) {
 }
 
 void print_eeprom_ssid(void) {
-  char ssid[32] = {0};
-  eeprom_read_block(ssid, (const void *) EEPROM_SSID, 31);
+  char ssid[33] = {0};
+  eeprom_read_block(ssid, (const void *) EEPROM_SSID, 32);
 
   if (!valid_ssid_config()) {
     Serial.println(F("No SSID currently configured."));
@@ -2527,7 +2527,7 @@ void print_eeprom_value(char * arg) {
     print_eeprom_float((const float *) EEPROM_O3_FINAL_SCALING);
     print_label_with_star_if_not_backed_up("O3 Final Offset [ppb]: ", BACKUP_STATUS_O3_CALIBRATION_BIT);
     print_eeprom_float((const float *) EEPROM_O3_FINAL_OFFSET);    
-    Serial.print(F("    ")); Serial.print(F("NO2 Report Negatives value as zero: "));
+    Serial.print(F("    ")); Serial.print(F("O3  Report Negatives value as zero: "));
     if(eeprom_read_byte((const uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS)){
       Serial.println(F("yes"));
     }
@@ -2634,8 +2634,8 @@ void restore(char * arg) {
     configInject("restore no2\r");
     configInject("restore o3\r");
     configInject("restore mac\r");
-    configInject("no2_negz 0\r");
-    configInject("o3_negz 0\r");
+    configInject("no2_negz 1\r");
+    configInject("o3_negz 1\r");
 
     eeprom_write_block(blank, (void *) EEPROM_SSID, 32); // clear the SSID
     eeprom_write_block(blank, (void *) EEPROM_NETWORK_PWD, 32); // clear the Network Password
@@ -2723,6 +2723,10 @@ void restore(char * arg) {
     eeprom_write_block(tmp, (void *) EEPROM_NO2_CAL_SLOPE, 4);
     eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_NO2_CAL_OFFSET, 4);
     eeprom_write_block(tmp, (void *) EEPROM_NO2_CAL_OFFSET, 4);
+    eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_NO2_FINAL_SCALING, 4);  
+    eeprom_write_block(tmp, (void *) EEPROM_NO2_FINAL_SCALING, 4);    
+    eeprom_read_block(tmp, (const void *) EEPROM_BACKUP_NO2_FINAL_OFFSET, 4);  
+    eeprom_write_block(tmp, (void *) EEPROM_NO2_FINAL_OFFSET, 4);      
   }
   else if (strncmp("o3", arg, 2) == 0) {
     if (!BIT_IS_CLEARED(backup_check, BACKUP_STATUS_O3_CALIBRATION_BIT)) {
@@ -3160,15 +3164,15 @@ void set_ssid(char * arg) {
   
   // we've reserved 32-bytes of EEPROM for an SSID
   // so the argument's length must be <= 31
-  char ssid[32] = {0};
+  char ssid[33] = {0};
   uint16_t len = strlen(arg);
-  if (len < 32) {
+  if (len <= 32) {
     strncpy(ssid, arg, len);
     eeprom_write_block(ssid, (void *) EEPROM_SSID, 32);
     recomputeAndStoreConfigChecksum();
   }
   else {
-    Serial.println(F("Error: SSID must be less than 32 characters in length"));
+    Serial.println(F("Error: SSID must be less than 33 characters in length"));
   }
 }
 
@@ -4060,21 +4064,31 @@ void o3_final_scaling(char * arg){
 }
 
 void no2_negz(char * arg){
+  if(!configMemoryUnlocked(__LINE__)){
+    return;
+  }
+  
   if(strcmp(arg, "0") == 0){
     eeprom_write_byte((uint8_t *) EEPROM_NO2_ZERO_NEGATIVE_RESULTS, 0);
   }
   else{
     eeprom_write_byte((uint8_t *) EEPROM_NO2_ZERO_NEGATIVE_RESULTS, 1);
   }
+  recomputeAndStoreConfigChecksum();
 }
 
 void o3_negz(char * arg){
+  if(!configMemoryUnlocked(__LINE__)){
+    return;
+  }
+  
   if(strcmp(arg, "0") == 0){
     eeprom_write_byte((uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS, 0);
   }
   else{
     eeprom_write_byte((uint8_t *) EEPROM_O3_ZERO_NEGATIVE_RESULTS, 1);
   }  
+  recomputeAndStoreConfigChecksum();
 }
 
 void set_reported_temperature_offset(char * arg) {
@@ -5092,7 +5106,7 @@ bool displayConnectionDetails(void){
 }
 
 void reconnectToAccessPoint(void){
-  static char ssid[32] = {0};
+  static char ssid[33] = {0};
   static char network_password[32] = {0};
   static uint8_t connect_method = 0;
   static uint8_t network_security_mode = 0;
@@ -5102,7 +5116,7 @@ void reconnectToAccessPoint(void){
     first_access = false;
     connect_method = eeprom_read_byte((const uint8_t *) EEPROM_CONNECT_METHOD);
     network_security_mode = eeprom_read_byte((const uint8_t *) EEPROM_SECURITY_MODE);  
-    eeprom_read_block(ssid, (const void *) EEPROM_SSID, 31);
+    eeprom_read_block(ssid, (const void *) EEPROM_SSID, 32);
     eeprom_read_block(network_password, (const void *) EEPROM_NETWORK_PWD, 31); 
     eeprom_read_block(mac_address, (const void *) EEPROM_MAC_ADDRESS, 6);
   }
