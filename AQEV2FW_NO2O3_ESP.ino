@@ -5398,7 +5398,7 @@ boolean mqttPublish(char * topic, char *str){
   uint32_t space_required = 5;
   space_required += strlen(topic);
   space_required += strlen(str);
-  if(space_required >= 511){
+  if(space_required >= 1023){
     Serial.println(F("Aborted."));
     response_status = false;
   } 
